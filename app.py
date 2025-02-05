@@ -1,17 +1,25 @@
 import os
 import subprocess
 import threading
-import tkinter as tk
+import customtkinter as ctk
 from tkinter import filedialog, messagebox
+from tkinter.scrolledtext import ScrolledText
+import tkinter as tk  # for standard Listbox
 
-# Global variables for status animation.
+# Set CustomTkinter appearance to Dark mode and use the dark-blue theme.
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("dark-blue")
+
+# -------------------------------
+# Global Variables for Animation
+# -------------------------------
 current_file_name = ""
 animation_counter = 0
 animation_running = False
 
-# -------------
-# File Selection
-# -------------
+# -------------------------------
+# File Selection & Clear Functions
+# -------------------------------
 def select_files():
     """Open a file dialog to select audio files and display them in the listbox."""
     file_paths = filedialog.askopenfilenames(
@@ -26,104 +34,146 @@ def select_files():
     for path in file_paths:
         file_list.insert(tk.END, path)
 
-# -----------------------
-# Update Advanced Widgets
-# -----------------------
+def clear_files():
+    """Clear the list of uploaded files."""
+    file_list.delete(0, tk.END)
+
+# -------------------------------
+# Show Encoding Details (Using ffprobe)
+# -------------------------------
+def show_encoding_details():
+    """
+    Open a popup that lets the user choose one of the uploaded files and then
+    displays its encoding details (using ffprobe).
+    """
+    if file_list.get(0, tk.END) == ():
+        messagebox.showinfo("No Files", "Please upload some files first.")
+        return
+
+    details_popup = ctk.CTkToplevel(root)
+    details_popup.title("Select File for Encoding Details")
+    details_popup.geometry("500x300")
+    
+    label = ctk.CTkLabel(details_popup, text="Select a file:", font=("Helvetica", 12))
+    label.pack(padx=10, pady=5)
+    
+    # Use a standard Tkinter Listbox with dark colors.
+    details_listbox = tk.Listbox(details_popup, width=60, height=6, font=("Helvetica", 10),
+                                 bg="#2b2b2b", fg="white", selectbackground="#3e3e3e", selectforeground="white")
+    for file in file_list.get(0, tk.END):
+        details_listbox.insert(tk.END, file)
+    details_listbox.pack(padx=10, pady=5)
+    
+    def get_details():
+        selection = details_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Selection Error", "Please select a file from the list.")
+            return
+        file_path = details_listbox.get(selection[0])
+        try:
+            cmd = ["ffprobe", "-v", "error", "-show_format", "-show_streams", file_path]
+            details = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("ffprobe Error", f"Error retrieving details:\n{e.output}")
+            return
+        
+        details_window = ctk.CTkToplevel(details_popup)
+        details_window.title(f"Encoding Details for {os.path.basename(file_path)}")
+        details_window.geometry("600x400")
+        text_box = ScrolledText(details_window, wrap="word", font=("Helvetica", 10))
+        text_box.pack(expand=True, fill="both")
+        text_box.insert("1.0", details)
+        text_box.configure(state="disabled")
+    
+    details_button = ctk.CTkButton(details_popup, text="Show Details", command=get_details)
+    details_button.pack(padx=10, pady=10)
+
+# -------------------------------
+# Update Advanced Widgets (mp3 vs wav)
+# -------------------------------
 def update_format_settings(*args):
     """
-    Adjust advanced settings based on the chosen output format.
-    
-    For wav:
-      - Hide encoding widgets.
+    Adjust advanced settings based on the selected output format.
+    For WAV:
+      - Hide mp3 encoding widgets.
       - Update sample rate options to common PCM rates.
       - Show the WAV Bit Depth widget.
-      
     For mp3:
-      - Hide WAV widgets.
+      - Hide WAV-specific widgets.
       - Update sample rate options for compressed formats.
-      - Show encoding settings (CBR/VBR) via an encoding dropdown.
+      - Show mp3 encoding settings (VBR/CBR).
     """
     fmt = output_format_var.get().lower()
     if fmt == "wav":
-        # Hide encoding widgets (only applicable for mp3).
-        encoding_label.grid_remove()
-        encoding_menu.grid_remove()
-        vbr_quality_label.grid_remove()
-        vbr_quality_menu.grid_remove()
-        bitrate_label.grid_remove()
-        bitrate_menu.grid_remove()
-
-        # Update sample rate options for WAV (PCM).
+        # Hide mp3 encoding widgets.
+        encoding_label.grid_forget()
+        encoding_menu.grid_forget()
+        vbr_quality_label.grid_forget()
+        vbr_quality_menu.grid_forget()
+        bitrate_label.grid_forget()
+        bitrate_menu.grid_forget()
+        # Update sample rate options.
         new_rates = ["44100", "48000", "96000", "192000"]
         sample_rate_var.set(new_rates[0])
-        sample_rate_menu["menu"].delete(0, "end")
-        for rate in new_rates:
-            sample_rate_menu["menu"].add_command(label=rate, command=tk._setit(sample_rate_var, rate))
-        # Show the WAV Bit Depth widget.
-        wav_bit_depth_label.grid(row=5, column=0, sticky="w", pady=5)
-        wav_bit_depth_menu.grid(row=5, column=1, sticky="ew", pady=5)
+        sample_rate_menu.configure(values=new_rates)
+        # Show WAV Bit Depth widget.
+        wav_bit_depth_label.grid(row=7, column=0, padx=10, pady=5, sticky="w")
+        wav_bit_depth_menu.grid(row=7, column=1, padx=10, pady=5, sticky="ew")
     elif fmt == "mp3":
-        # Hide WAV-specific widgets.
-        wav_bit_depth_label.grid_remove()
-        wav_bit_depth_menu.grid_remove()
-        # Update sample rate options for mp3.
+        # Hide WAV-specific widget.
+        wav_bit_depth_label.grid_forget()
+        wav_bit_depth_menu.grid_forget()
         new_rates = ["22050", "44100", "48000"]
         sample_rate_var.set(new_rates[0])
-        sample_rate_menu["menu"].delete(0, "end")
-        for rate in new_rates:
-            sample_rate_menu["menu"].add_command(label=rate, command=tk._setit(sample_rate_var, rate))
-        # Show encoding settings for mp3.
-        encoding_label.grid(row=5, column=0, sticky="w", pady=5)
-        encoding_menu.grid(row=5, column=1, sticky="ew", pady=5)
+        sample_rate_menu.configure(values=new_rates)
+        # Show mp3 encoding options.
+        encoding_label.grid(row=7, column=0, padx=10, pady=5, sticky="w")
+        encoding_menu.grid(row=7, column=1, padx=10, pady=5, sticky="ew")
         update_encoding_settings()
 
 def update_encoding_settings(*args):
     """
     For mp3, based on the chosen encoding type (VBR or CBR):
-      - If "Variable bitrate" is selected, show the VBR Quality drop-down.
-      - If "Constant bitrate" is selected, show the Bitrate drop-down.
+      - If VBR is selected, show the VBR Quality drop-down.
+      - If CBR is selected, show the Bitrate drop-down.
     """
     if output_format_var.get().lower() != "mp3":
-        # Not applicable for wav.
-        vbr_quality_label.grid_remove()
-        vbr_quality_menu.grid_remove()
-        bitrate_label.grid_remove()
-        bitrate_menu.grid_remove()
+        vbr_quality_label.grid_forget()
+        vbr_quality_menu.grid_forget()
+        bitrate_label.grid_forget()
+        bitrate_menu.grid_forget()
         return
 
     if encoding_var.get() == "Variable bitrate":
-        vbr_quality_label.grid(row=7, column=0, sticky="w", pady=5)
-        vbr_quality_menu.grid(row=7, column=1, sticky="ew", pady=5)
-        bitrate_label.grid_remove()
-        bitrate_menu.grid_remove()
+        vbr_quality_label.grid(row=9, column=0, padx=10, pady=5, sticky="w")
+        vbr_quality_menu.grid(row=9, column=1, padx=10, pady=5, sticky="ew")
+        bitrate_label.grid_forget()
+        bitrate_menu.grid_forget()
     else:
-        bitrate_label.grid(row=7, column=0, sticky="w", pady=5)
-        bitrate_menu.grid(row=7, column=1, sticky="ew", pady=5)
-        vbr_quality_label.grid_remove()
-        vbr_quality_menu.grid_remove()
+        bitrate_label.grid(row=9, column=0, padx=10, pady=5, sticky="w")
+        bitrate_menu.grid(row=9, column=1, padx=10, pady=5, sticky="ew")
+        vbr_quality_label.grid_forget()
+        vbr_quality_menu.grid_forget()
 
-# --------------------
+# -------------------------------
 # Animated Status Update
-# --------------------
+# -------------------------------
 def animate_status():
     """Update the processing popup label with animated dots."""
     global animation_counter, animation_running
     if processing_popup is None or not animation_running:
         return
-    # Cycle through 0 to 3 dots.
     dots = "." * (animation_counter % 4)
-    status_text = f"Converting '{current_file_name}'{dots}"
-    status_label.config(text=status_text)
+    status_label.configure(text=f"Converting '{current_file_name}'{dots}")
     animation_counter += 1
-    # Schedule the next update.
     processing_popup.after(500, animate_status)
 
-# --------------------
-# Conversion Process
-# --------------------
+# -------------------------------
+# Conversion Process (Background Thread)
+# -------------------------------
 def conversion_process():
     """
-    Convert the selected files using the chosen options via ffmpeg.
+    Convert each uploaded file using ffmpeg with the selected options.
     Runs in a background thread.
     """
     global current_file_name, animation_running
@@ -134,12 +184,9 @@ def conversion_process():
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
 
-    # Process each file sequentially.
-    for index in range(file_list.size()):
-        input_file = file_list.get(index)
+    for i in range(len(file_list.get(0, tk.END))):
+        input_file = file_list.get(i)
         current_file_name = os.path.basename(input_file)
-        # (The animate_status function will pick up the new filename.)
-        # Build the ffmpeg command.
         base_name = os.path.splitext(os.path.basename(input_file))[0]
         output_file = os.path.join(result_dir, base_name + f".{fmt}")
         command = [
@@ -147,7 +194,7 @@ def conversion_process():
             "-i", input_file,
             "-ar", sample_rate
         ]
-        # Set number of channels.
+        # Set channel.
         if channel.lower() == "mono":
             command.extend(["-ac", "1"])
         elif channel.lower() == "stereo":
@@ -162,7 +209,6 @@ def conversion_process():
             else:
                 command.extend(["-b:a", bitrate_var.get().strip()])
         elif fmt == "wav":
-            # For WAV, use PCM encoding based on selected bit depth.
             depth = wav_bit_depth_var.get().strip()
             if depth == "16":
                 codec = "pcm_s16le"
@@ -174,20 +220,19 @@ def conversion_process():
                 codec = "pcm_s16le"
             command.extend(["-c:a", codec])
         else:
-            continue  # Unsupported format
+            continue
 
         command.append(output_file)
         print("Running command:", " ".join(command))
         try:
             subprocess.run(command, check=True)
         except subprocess.CalledProcessError as e:
-            # If an error occurs, destroy the popup and show an error.
             if processing_popup is not None:
                 processing_popup.destroy()
-            messagebox.showerror("Conversion Error", f"Failed to convert:\n{input_file}\nError: {e}")
+            messagebox.showerror("Conversion Error",
+                                 f"Failed to convert:\n{input_file}\nError: {e}")
             return
 
-    # After finishing all files, stop the animation and close the popup.
     animation_running = False
     if processing_popup is not None:
         processing_popup.destroy()
@@ -197,22 +242,18 @@ def start_conversion():
     """
     Start the conversion process in a background thread and display a processing popup.
     """
-    global processing_popup, animation_running, current_file_name, animation_counter
-    processing_popup = tk.Toplevel(root)
+    global processing_popup, animation_running, current_file_name, animation_counter, status_label
+    processing_popup = ctk.CTkToplevel(root)
     processing_popup.title("Processing")
-    # Create a label for the animated status message.
-    global status_label
-    status_label = tk.Label(processing_popup, text="Preparing...", padx=20, pady=20)
-    status_label.pack()
-    processing_popup.resizable(False, False)
-    processing_popup.geometry("+%d+%d" % (root.winfo_rootx()+50, root.winfo_rooty()+50))
+    status_label = ctk.CTkLabel(processing_popup, text="Preparing...", font=("Helvetica", 14))
+    status_label.pack(padx=20, pady=20)
+    processing_popup.geometry(f"+{root.winfo_rootx()+50}+{root.winfo_rooty()+50}")
     root.attributes("-disabled", True)
 
-    # Initialize the animation globals.
     current_file_name = ""
     animation_counter = 0
     animation_running = True
-    animate_status()  # Start the animation
+    animate_status()
 
     def reenable_main():
         root.attributes("-disabled", False)
@@ -220,82 +261,99 @@ def start_conversion():
     def thread_finished():
         reenable_main()
 
-    conv_thread = threading.Thread(target=lambda: [conversion_process(), root.after(0, thread_finished)])
+    conv_thread = threading.Thread(target=lambda: [conversion_process(),
+                                                     root.after(0, thread_finished)])
     conv_thread.start()
 
-# -------------------------
-# Build the GUI
-# -------------------------
-root = tk.Tk()
+# -------------------------------
+# Main GUI – Using CustomTkinter (Dark Mode)
+# -------------------------------
+root = ctk.CTk()
 root.title("Audio Converter")
+root.geometry("500x500")
 
-processing_popup = None
+# Main frame.
+frame = ctk.CTkFrame(root, corner_radius=8)
+frame.pack(padx=20, pady=20, fill="both", expand=True)
 
-frame = tk.Frame(root, padx=10, pady=10)
-frame.pack()
+# Row 0: File Selection and Clear Buttons.
+buttons_frame = ctk.CTkFrame(frame)
+buttons_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), sticky="ew")
+select_button = ctk.CTkButton(buttons_frame, text="Select Files", command=select_files)
+select_button.grid(row=0, column=0, padx=(10, 5), pady=5, sticky="ew")
+clear_button = ctk.CTkButton(buttons_frame, text="Clear Files", command=clear_files)
+clear_button.grid(row=0, column=1, padx=(5, 10), pady=5, sticky="ew")
 
-# Row 0: File selection button.
-select_button = tk.Button(frame, text="Select Files", command=select_files)
-select_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+# Row 1: Listbox for Uploaded Files (standard Tkinter Listbox with dark colors).
+file_list = tk.Listbox(frame, width=80, height=10, font=("Helvetica", 10),
+                       bg="#2b2b2b", fg="white", selectbackground="#3e3e3e", selectforeground="white")
+file_list.grid(row=1, column=0, columnspan=2, padx=10, pady=(5, 10), sticky="nsew")
 
-# Row 1: Listbox with selected files.
-file_list = tk.Listbox(frame, width=80, height=10)
-file_list.grid(row=1, column=0, columnspan=2, pady=(0, 10))
+# Row 2: Encoding Details Button.
+encode_details_button = ctk.CTkButton(frame, text="Encoding Details", command=show_encoding_details)
+encode_details_button.grid(row=2, column=0, columnspan=2, padx=10, pady=(5, 10), sticky="ew")
 
-# Row 2: Output Format.
-tk.Label(frame, text="Output Format:").grid(row=2, column=0, sticky="w", pady=5)
+# Row 3: Output Format.
+output_format_label = ctk.CTkLabel(frame, text="Output Format:", font=("Helvetica", 12))
+output_format_label.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 output_format_options = ["mp3", "wav"]
-output_format_var = tk.StringVar(value=output_format_options[0])
-output_format_menu = tk.OptionMenu(frame, output_format_var, *output_format_options)
-output_format_menu.grid(row=2, column=1, sticky="ew", pady=5)
+output_format_var = ctk.StringVar(value=output_format_options[0])
+output_format_menu = ctk.CTkOptionMenu(frame, variable=output_format_var, values=output_format_options, font=("Helvetica", 12))
+output_format_menu.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 output_format_var.trace("w", update_format_settings)
 
-# Row 3: Sample Rate.
-tk.Label(frame, text="Sample Rate (Hz):").grid(row=3, column=0, sticky="w", pady=5)
-# Options will be updated by update_format_settings.
+# Row 4: Sample Rate.
+sample_rate_label = ctk.CTkLabel(frame, text="Sample Rate (Hz):", font=("Helvetica", 12))
+sample_rate_label.grid(row=4, column=0, padx=10, pady=5, sticky="w")
 sample_rate_options = ["22050", "44100", "48000"]
-sample_rate_var = tk.StringVar(value=sample_rate_options[0])
-sample_rate_menu = tk.OptionMenu(frame, sample_rate_var, *sample_rate_options)
-sample_rate_menu.grid(row=3, column=1, sticky="ew", pady=5)
+sample_rate_var = ctk.StringVar(value=sample_rate_options[0])
+sample_rate_menu = ctk.CTkOptionMenu(frame, variable=sample_rate_var, values=sample_rate_options, font=("Helvetica", 12))
+sample_rate_menu.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
 
-# Row 4: Channel.
-tk.Label(frame, text="Channel:").grid(row=4, column=0, sticky="w", pady=5)
+# Row 5: Channel.
+channel_label = ctk.CTkLabel(frame, text="Channel:", font=("Helvetica", 12))
+channel_label.grid(row=5, column=0, padx=10, pady=5, sticky="w")
 channel_options = ["Mono", "Stereo"]
-channel_var = tk.StringVar(value="Mono")
-channel_menu = tk.OptionMenu(frame, channel_var, *channel_options)
-channel_menu.grid(row=4, column=1, sticky="ew", pady=5)
+channel_var = ctk.StringVar(value="Mono")
+channel_menu = ctk.CTkOptionMenu(frame, variable=channel_var, values=channel_options, font=("Helvetica", 12))
+channel_menu.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
 
-# --- Widgets for WAV ---
-wav_bit_depth_label = tk.Label(frame, text="Bit Depth (WAV):")
+# Row 6: (Advanced Settings for WAV or mp3)
+# For WAV: WAV Bit Depth.
+wav_bit_depth_label = ctk.CTkLabel(frame, text="Bit Depth (WAV):", font=("Helvetica", 12))
 wav_bit_depth_options = ["16", "24", "32"]
-wav_bit_depth_var = tk.StringVar(value="16")
-wav_bit_depth_menu = tk.OptionMenu(frame, wav_bit_depth_var, *wav_bit_depth_options)
-
-# --- Widgets for mp3 ---
-# Encoding (VBR/CBR) Option
-encoding_label = tk.Label(frame, text="Encoding:")
+wav_bit_depth_var = ctk.StringVar(value="16")
+wav_bit_depth_menu = ctk.CTkOptionMenu(frame, variable=wav_bit_depth_var, values=wav_bit_depth_options, font=("Helvetica", 12))
+# For mp3: Encoding Option (VBR/CBR).
+encoding_label = ctk.CTkLabel(frame, text="Encoding:", font=("Helvetica", 12))
 encoding_options = ["Variable bitrate", "Constant bitrate"]
-encoding_var = tk.StringVar(value="Variable bitrate")
-encoding_menu = tk.OptionMenu(frame, encoding_var, *encoding_options)
+encoding_var = ctk.StringVar(value="Variable bitrate")
+encoding_menu = ctk.CTkOptionMenu(frame, variable=encoding_var, values=encoding_options, font=("Helvetica", 12))
 encoding_var.trace("w", update_encoding_settings)
+# (These widgets are placed via update_format_settings.)
 
-# For CBR, use a drop-down for common bitrates.
-bitrate_label = tk.Label(frame, text="Bitrate (for CBR):")
-bitrate_options = ["80k", "96k", "128k", "192k", "256k", "320k"]
-bitrate_var = tk.StringVar(value=bitrate_options[0])
-bitrate_menu = tk.OptionMenu(frame, bitrate_var, *bitrate_options)
-
-# For VBR, use a drop-down for quality settings (0-9).
-vbr_quality_label = tk.Label(frame, text="VBR Quality (0-9):")
+# Row 8: Advanced Encoding Details for mp3.
+# For mp3 CBR: Bitrate.
+bitrate_label = ctk.CTkLabel(frame, text="Bitrate (for CBR):", font=("Helvetica", 12))
+bitrate_options = ["64k", "80k", "96k", "128k", "192k", "256k", "320k"]
+bitrate_var = ctk.StringVar(value=bitrate_options[0])
+bitrate_menu = ctk.CTkOptionMenu(frame, variable=bitrate_var, values=bitrate_options, font=("Helvetica", 12))
+# For mp3 VBR: VBR Quality.
+vbr_quality_label = ctk.CTkLabel(frame, text="VBR Quality (0-9):", font=("Helvetica", 12))
 vbr_quality_options = [str(i) for i in range(0, 10)]
-vbr_quality_var = tk.StringVar(value="7")
-vbr_quality_menu = tk.OptionMenu(frame, vbr_quality_var, *vbr_quality_options)
+vbr_quality_var = ctk.StringVar(value="7")
+vbr_quality_menu = ctk.CTkOptionMenu(frame, variable=vbr_quality_var, values=vbr_quality_options, font=("Helvetica", 12))
 
-# Place the Convert button.
-convert_button = tk.Button(frame, text="Convert", command=start_conversion)
-convert_button.grid(row=8, column=0, columnspan=2, pady=(10, 0), sticky="ew")
+# Row 10: Convert Button.
+convert_button = ctk.CTkButton(frame, text="Convert", command=start_conversion, font=("Helvetica", 12, "bold"))
+convert_button.grid(row=10, column=0, columnspan=2, padx=10, pady=(15, 10), sticky="ew")
 
 # Initialize widgets according to the default format.
 update_format_settings()
+
+# Configure grid expansion.
+frame.columnconfigure(0, weight=1)
+frame.columnconfigure(1, weight=1)
+frame.rowconfigure(1, weight=1)
 
 root.mainloop()
